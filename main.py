@@ -45,3 +45,50 @@ async def convert_to_sketch_api(file: UploadFile = File(...)):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def convert_to_cartoon(image_data: bytes) -> bytes:
+    # Convert bytes to a numpy array
+    nparr = np.frombuffer(image_data, np.uint8)
+    # Convert numpy array to image
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    # Apply cartoon effect
+    # Step 1: Apply a bilateral filter to reduce the color palette of the image.
+    color = cv2.bilateralFilter(img, d=9, sigmaColor=75, sigmaSpace=75)
+
+    # Step 2: Convert to grayscale and apply median blur
+    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 7)
+
+    # Step 3: Use adaptive thresholding to create an edge mask
+    edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, blockSize=9, C=2)
+
+    # Step 4: Combine the edge mask with the color image
+    cartoon = cv2.bitwise_and(color, color, mask=edges)
+
+    # Step 5 (Optional): Increase color vibrancy
+    # This step increases the vibrancy of the colors in the cartoon
+    # by converting to HSV, scaling up the saturation, and then converting back to BGR.
+    cartoon_hsv = cv2.cvtColor(cartoon, cv2.COLOR_BGR2HSV)
+    cartoon_hsv[:, :, 1] = cv2.multiply(cartoon_hsv[:, :, 1], 1.3)
+    cartoon = cv2.cvtColor(cartoon_hsv, cv2.COLOR_HSV2BGR)
+
+    # Encode the cartoon image to bytes
+    _, cartoon_data = cv2.imencode(".jpg", cartoon)
+    
+    return cartoon_data.tobytes()
+
+@app.post("/convert_to_cartoon/")
+async def convert_to_cartoon_api(file: UploadFile = File(...)):
+    try:
+        # Read the uploaded image
+        image_data = await file.read()
+        
+        # Convert the image to cartoon
+        cartoon_data = convert_to_cartoon(image_data)
+        
+        # Return the cartoon image as a downloadable file
+        return StreamingResponse(io.BytesIO(cartoon_data), media_type="image/jpeg", headers={"Content-Disposition": "attachment;filename=cartoon.jpg"})
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
